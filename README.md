@@ -1,10 +1,11 @@
-Assessment rules
+**Assessment rules**
+
 Mihai Toma and Piotr Wójcik
 academic year 2025/2026
 General information
 Your will work on a practical machine learning project related to classification. The data is exactly the same for all students.
-
-dataset: job_change
+_
+dataset: job_change_
 Your task is to apply various ML algorithms (see the rules below) to build a model explaining whether a particular person is willing to change job based on the training sample and generate predictions for all observations from the test sample.
 
 The dataset includes 12427 observations in the training sample and 3308 in the test sample and the following columns:
