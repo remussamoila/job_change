@@ -154,14 +154,14 @@ def main():
     candidates.append((
         "RandomForest",
         Pipeline([("preprocess", ohe_pre),
-                  ("model", RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=-1))]),
+                  ("model", RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=-1, class_weight="balanced"))]),
         {
-            "model__n_estimators": [400, 800, 1200],
-            "model__max_depth": [None, 8, 12, 18, 24],
-            "model__min_samples_leaf": [1, 2, 5, 10],
+            "model__n_estimators": [600, 1000],   #[400, 800, 1200]
+            "model__max_depth": [6, 8, 10, None], #[None, 8, 12, 18, 24]
+            "model__min_samples_leaf": [2, 5, 10], #[1, 2, 5, 10]
             "model__max_features": ["sqrt", "log2", None],
         },
-        20
+        12
     ))
 
     # --- XGBoost (FAST) ---
