@@ -193,7 +193,7 @@ candidates.append((
         Pipeline([("preprocess", ohe_pre),
                   ("model", LGBMClassifier(
                       random_state=RANDOM_STATE,
-                      n_estimators=2000,
+                      n_estimators=600,
                       n_jobs=-1
                   ))]),
         {
@@ -205,7 +205,7 @@ candidates.append((
             "model__colsample_bytree": [0.7, 0.85, 1.0],
             "model__reg_lambda": [0.0, 0.5, 1.0, 2.0],
         },
-        25
+        8
     ))
 
     # --- CatBoost (native categorical, avoids huge OHE) ---
@@ -230,7 +230,7 @@ candidates.append((
             scoring=scorer,
             cv=cv,
             random_state=RANDOM_STATE,
-            n_jobs=-1,
+            n_jobs=1,
             refit=True,
             verbose=0
         )
