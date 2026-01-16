@@ -233,7 +233,7 @@ def main():
             random_state=RANDOM_STATE,
             n_jobs=1,
             refit=True,
-            verbose=0
+            verbose=2
         )
         search.fit(X, y)
 
