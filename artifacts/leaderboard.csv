@@ -1,0 +1,7 @@
+model,cv_balanced_acc_mean,cv_balanced_acc_std,best_params
+RandomForest,0.7298076650819969,0.009271407673297665,"{'model__n_estimators': 1200, 'model__min_samples_leaf': 5, 'model__max_features': None, 'model__max_depth': 8}"
+CatBoost,0.7255432436864035,0.015263071474089932,"{'model__depth': 6, 'model__learning_rate': 0.02, 'model__l2_leaf_reg': 5.0, 'model__iterations': 1200}"
+LightGBM,0.7206155420358462,0.00839127844474193,"{'model__subsample': 0.85, 'model__reg_lambda': 2.0, 'model__num_leaves': 15, 'model__min_child_samples': 10, 'model__max_depth': 8, 'model__learning_rate': 0.01, 'model__colsample_bytree': 0.85}"
+XGBoost,0.7104381561910446,0.005211378203409389,"{'model__subsample': 0.85, 'model__reg_lambda': 5.0, 'model__min_child_weight': 5, 'model__max_depth': 5, 'model__learning_rate': 0.02, 'model__colsample_bytree': 0.7}"
+LogReg,0.6421807338895487,0.00587001919698332,"{'model__penalty': 'l2', 'model__C': np.float64(23.71373705661655)}"
+LinearSVC,0.6391051192357032,0.006945158223768838,{'model__C': np.float64(14.677992676220706)}
