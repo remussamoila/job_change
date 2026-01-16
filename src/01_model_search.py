@@ -195,7 +195,8 @@ def main():
                   ("model", LGBMClassifier(
                       random_state=RANDOM_STATE,
                       n_estimators=600,
-                      n_jobs=-1
+                      n_jobs=-1,
+                      verbose=-1
                   ))]),
         {
             "model__learning_rate": [0.01, 0.03, 0.05, 0.1],
