@@ -164,27 +164,28 @@ def main():
         20
     ))
 
-    # --- XGBoost ---
-    candidates.append((
-        "XGBoost",
-        Pipeline([("preprocess", ohe_pre),
-                  ("model", XGBClassifier(
-                      random_state=RANDOM_STATE,
-                      n_estimators=800,
-                      tree_method="hist",
-                      eval_metric="logloss",
-                      n_jobs=-1
-                  ))]),
-        {
-            "model__max_depth": [3, 4, 5, 6, 8],
-            "model__learning_rate": [0.02, 0.05, 0.1, 0.15],
-            "model__subsample": [0.7, 0.85, 1.0],
-            "model__colsample_bytree": [0.7, 0.85, 1.0],
-            "model__min_child_weight": [1, 3, 5, 10],
-            "model__reg_lambda": [0.5, 1.0, 2.0, 5.0],
-        },
-        25
-    ))
+# --- XGBoost (FAST) ---
+candidates.append((
+    "XGBoost",
+    Pipeline([("preprocess", ohe_pre),
+              ("model", XGBClassifier(
+                  random_state=RANDOM_STATE,
+                  n_estimators=300,          # was 800
+                  tree_method="hist",
+                  eval_metric="logloss",
+                  n_jobs=1                   # important for stability in Colab
+              ))]),
+    {
+        "model__max_depth": [3, 4, 5, 6],
+        "model__learning_rate": [0.03, 0.05, 0.1],
+        "model__subsample": [0.8, 1.0],
+        "model__colsample_bytree": [0.8, 1.0],
+        "model__min_child_weight": [1, 5, 10],
+        "model__reg_lambda": [1.0, 3.0],
+    },
+    8  # was 25
+))
+
 
     # --- LightGBM ---
     candidates.append((
