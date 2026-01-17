@@ -1,3 +1,31 @@
+"""
+Unified model search script:
+- Uses GridSearchCV for small/fast models (LogReg, LinearSVC)
+- Uses RandomizedSearchCV for larger spaces (RandomForest, RandomForest+SMOTE, XGBoost, LightGBM)
+- Uses manual randomized CV for CatBoost (native categorical)
+- Saves:
+  - artifacts/leaderboard.csv
+  - artifacts/best_model.json
+  - artifacts/predictions_from_best_search.csv
+
+Models evaluated
+
+Baselines / linear:
+1) Logistic Regression (OHE) GridSearchCV
+2) Linear SVM (LinearSVC, OHE) GridSearchCV
+
+Tree ensembles:
+3) Random Forest (OHE, class_weight="balanced")
+4) Random Forest + SMOTE (OHE + SMOTE inside CV, no leakage)
+
+Boosting:
+5) XGBoost (OHE)
+6) LightGBM (OHE)
+7) CatBoost (native categorical handling; no OHE)
+
+Metric: Balanced Accuracy (5-fold Stratified CV)
+"""
+
 import json
 import warnings
 from pathlib import Path
@@ -5,7 +33,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from sklearn.model_selection import StratifiedKFold, RandomizedSearchCV
+from sklearn.model_selection import StratifiedKFold, RandomizedSearchCV, GridSearchCV
 from sklearn.metrics import balanced_accuracy_score, make_scorer
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -14,13 +42,13 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
 
-# External (installed in your environment)
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from catboost import CatBoostClassifier
 
-# Rebalancing (installed via: pip install imbalanced-learn)
+# Rebalancing
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
 
@@ -36,7 +64,6 @@ ARTIFACTS_DIR.mkdir(exist_ok=True)
 TARGET_COL = "willing_to_change_job"
 ID_COL = "id"
 
-# Expected numeric cols (from assignment; plus two that often come as text)
 EXPECTED_NUMERIC = [
     "age",
     "relative_wage",
@@ -55,7 +82,6 @@ def _coerce_numeric(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 
 
 def _map_target(y: pd.Series) -> pd.Series:
-    # Handles Yes/No or already-binary
     if y.dtype == "O":
         y2 = y.astype(str).str.strip().str.lower()
         return y2.map({"yes": 1, "no": 0}).astype("int64")
@@ -63,23 +89,17 @@ def _map_target(y: pd.Series) -> pd.Series:
 
 
 def build_ohe_preprocessor(X: pd.DataFrame):
-    # Categorical = object/category/bool (excluding ID)
     cat_cols = [
         c for c in X.columns
         if c != ID_COL and (X[c].dtype == "object" or str(X[c].dtype) == "category" or X[c].dtype == "bool")
     ]
-    num_cols = [
-        c for c in X.columns
-        if c != ID_COL and c not in cat_cols
-    ]
+    num_cols = [c for c in X.columns if c != ID_COL and c not in cat_cols]
 
-    # numeric pipeline
     num_pipe = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="median")),
-        ("scaler", StandardScaler(with_mean=False)),  # with_mean=False works with sparse output
+        ("scaler", StandardScaler(with_mean=False)),
     ])
 
-    # categorical pipeline
     cat_pipe = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="most_frequent")),
         ("onehot", OneHotEncoder(handle_unknown="ignore")),
@@ -97,79 +117,94 @@ def build_ohe_preprocessor(X: pd.DataFrame):
 
 
 def main():
-    # ---- Load ----
     train = pd.read_csv(TRAIN_PATH)
     test = pd.read_csv(TEST_PATH)
 
-    # ---- Clean numeric fields that may be stored as text ----
     train = _coerce_numeric(train, EXPECTED_NUMERIC)
     test = _coerce_numeric(test, EXPECTED_NUMERIC)
 
-    # ---- Split ----
     X = train.drop(columns=[TARGET_COL])
     y = _map_target(train[TARGET_COL])
 
-    # ---- CV setup ----
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
     scorer = make_scorer(balanced_accuracy_score)
 
-    # ---- Preprocessor for sklearn models that need numeric matrix ----
     ohe_pre, num_cols, cat_cols = build_ohe_preprocessor(X)
 
     results = []
     best_overall = None
 
-    # ==========================================================
-    # 5+ Algorithms (meets requirement):
-    # 1) Logistic Regression (OHE)
-    # 2) Linear SVM (OHE)
-    # 3) Random Forest (OHE)
-    # 4) XGBoost (OHE)
-    # 5) LightGBM (OHE)
-    # 6) CatBoost (native categorical handling)
-    # ==========================================================
-
+    # Each candidate is either:
+    # - ("name", pipeline, "grid", param_grid)
+    # - ("name", pipeline, "rand", param_distributions, n_iter)
     candidates = []
 
-    # --- Logistic Regression ---
+    # -------------------------
+    # GRIDSEARCH (small spaces)
+    # -------------------------
     candidates.append((
         "LogReg",
-        Pipeline([("preprocess", ohe_pre),
-                  ("model", LogisticRegression(max_iter=5000, solver="saga", random_state=RANDOM_STATE))]),
+        Pipeline([
+            ("preprocess", ohe_pre),
+            ("model", LogisticRegression(max_iter=5000, solver="saga", random_state=RANDOM_STATE))
+        ]),
+        "grid",
         {
-            "model__C": np.logspace(-3, 2, 25),
+            "model__C": np.logspace(-3, 2, 10),
             "model__penalty": ["l2"],
-        },
-        20
+        }
     ))
 
-    # --- Linear SVC ---
     candidates.append((
         "LinearSVC",
-        Pipeline([("preprocess", ohe_pre),
-                  ("model", LinearSVC(random_state=RANDOM_STATE))]),
+        Pipeline([
+            ("preprocess", ohe_pre),
+            ("model", LinearSVC(random_state=RANDOM_STATE))
+        ]),
+        "grid",
         {
-            "model__C": np.logspace(-3, 2, 25),
-        },
-        20
+            "model__C": np.logspace(-3, 2, 10),
+        }
     ))
 
-    # --- Random Forest ---
+    candidates.append((
+        "KNN",
+        Pipeline([
+            ("preprocess", ohe_pre),
+            ("model", KNeighborsClassifier())
+        ]),
+        "grid",
+        {
+            "model__n_neighbors": [5, 11, 21, 31],
+            "model__weights": ["uniform", "distance"],
+            "model__p": [1, 2],  # Manhattan vs Euclidean
+        }
+    ))
+
+    
+    # -----------------------------
+    # RANDOMIZEDSEARCH (larger)
+    # -----------------------------
     candidates.append((
         "RandomForest",
-        Pipeline([("preprocess", ohe_pre),
-                  ("model", RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=-1, class_weight="balanced"))]),
+        Pipeline([
+            ("preprocess", ohe_pre),
+            ("model", RandomForestClassifier(
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+                class_weight="balanced"
+            ))
+        ]),
+        "rand",
         {
-            "model__n_estimators": [600, 1000],   #[400, 800, 1200]
-            "model__max_depth": [6, 8, 10, None], #[None, 8, 12, 18, 24]
-            "model__min_samples_leaf": [2, 5, 10], #[1, 2, 5, 10]
+            "model__n_estimators": [600, 1000],
+            "model__max_depth": [6, 8, 10, None],
+            "model__min_samples_leaf": [2, 5, 10],
             "model__max_features": ["sqrt", "log2", None],
         },
         12
     ))
 
-    # --- Random Forest + SMOTE (data rebalancing inside CV only; no leakage) ---
-    # NOTE: we remove class_weight here to avoid "double balancing" (SMOTE + weights)
     candidates.append((
         "RandomForest_SMOTE",
         ImbPipeline([
@@ -177,28 +212,30 @@ def main():
             ("smote", SMOTE(random_state=RANDOM_STATE, k_neighbors=3)),
             ("model", RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=-1))
         ]),
+        "rand",
         {
             "model__n_estimators": [600, 1000],
             "model__max_depth": [6, 8, 10, None],
             "model__min_samples_leaf": [2, 5, 10],
             "model__max_features": ["sqrt", "log2", None],
-            # Optional: sometimes helps with imbalance
-            "model__class_weight": [None, "balanced"]
+            "model__class_weight": [None],
         },
         12
     ))
-    
-    # --- XGBoost (FAST) ---
+
     candidates.append((
         "XGBoost",
-        Pipeline([("preprocess", ohe_pre),
-                  ("model", XGBClassifier(
-                      random_state=RANDOM_STATE,
-                      n_estimators=300,
-                      tree_method="hist",
-                      eval_metric="logloss",
-                      n_jobs=1
-                  ))]),
+        Pipeline([
+            ("preprocess", ohe_pre),
+            ("model", XGBClassifier(
+                random_state=RANDOM_STATE,
+                n_estimators=300,
+                tree_method="hist",
+                eval_metric="logloss",
+                n_jobs=1
+            ))
+        ]),
+        "rand",
         {
             "model__max_depth": [3, 4, 5, 6],
             "model__learning_rate": [0.03, 0.05, 0.1],
@@ -210,18 +247,18 @@ def main():
         8
     ))
 
-
-
-    # --- LightGBM ---
     candidates.append((
         "LightGBM",
-        Pipeline([("preprocess", ohe_pre),
-                  ("model", LGBMClassifier(
-                      random_state=RANDOM_STATE,
-                      n_estimators=600,
-                      n_jobs=-1,
-                      verbose=-1
-                  ))]),
+        Pipeline([
+            ("preprocess", ohe_pre),
+            ("model", LGBMClassifier(
+                random_state=RANDOM_STATE,
+                n_estimators=600,
+                n_jobs=-1,
+                verbose=-1
+            ))
+        ]),
+        "rand",
         {
             "model__learning_rate": [0.01, 0.03, 0.05, 0.1],
             "model__num_leaves": [15, 31, 63, 127],
@@ -234,32 +271,40 @@ def main():
         8
     ))
 
-    # --- CatBoost (native categorical, avoids huge OHE) ---
-    # Identify categorical columns by dtype (object/category/bool), excluding id
-    cb_cat_cols = [
-        c for c in X.columns
-        if c != ID_COL and (X[c].dtype == "object" or str(X[c].dtype) == "category" or X[c].dtype == "bool")
-    ]
-    cb_cat_idx = [X.columns.get_loc(c) for c in cb_cat_cols]  # indices in X DataFrame
-
-    # For CatBoost we do NOT one-hot; we impute simply and pass DataFrame directly.
-    # We'll do minimal imputation: numeric median, categorical most-frequent.
-    # Implement as a custom preprocessing step via pandas inside the search loop.
-
-    # ---- Run searches (sklearn-based models) ----
-    for name, pipe, params, n_iter in candidates:
+    # -------------------------
+    # Run sklearn searches
+    # -------------------------
+    for entry in candidates:
+        name, pipe, mode = entry[0], entry[1], entry[2]
         print(f"\n=== Tuning: {name} ===")
-        search = RandomizedSearchCV(
-            estimator=pipe,
-            param_distributions=params,
-            n_iter=n_iter,
-            scoring=scorer,
-            cv=cv,
-            random_state=RANDOM_STATE,
-            n_jobs=1,
-            refit=True,
-            verbose=2
-        )
+
+        if mode == "grid":
+            param_grid = entry[3]
+            search = GridSearchCV(
+                estimator=pipe,
+                param_grid=param_grid,
+                scoring=scorer,
+                cv=cv,
+                n_jobs=1,
+                refit=True,
+                verbose=2
+            )
+        elif mode == "rand":
+            param_dist, n_iter = entry[3], entry[4]
+            search = RandomizedSearchCV(
+                estimator=pipe,
+                param_distributions=param_dist,
+                n_iter=n_iter,
+                scoring=scorer,
+                cv=cv,
+                random_state=RANDOM_STATE,
+                n_jobs=1,
+                refit=True,
+                verbose=2
+            )
+        else:
+            raise ValueError(f"Unknown mode={mode}")
+
         search.fit(X, y)
 
         mean_score = float(search.best_score_)
@@ -267,6 +312,7 @@ def main():
         best_params = search.best_params_
 
         print(f"Best CV balanced accuracy: {mean_score:.4f} ± {std_score:.4f}")
+
         results.append({
             "model": name,
             "cv_balanced_acc_mean": mean_score,
@@ -283,28 +329,32 @@ def main():
                 "best_estimator": search.best_estimator_
             }
 
-    # ---- CatBoost search (manual CV loop, keeps native categorical) ----
+    # -------------------------
+    # CatBoost (native categorical)
+    # -------------------------
     print("\n=== Tuning: CatBoost (native categorical) ===")
 
-    # Simple imputations for CatBoost
+    cb_cat_cols = [
+        c for c in X.columns
+        if c != ID_COL and (X[c].dtype == "object" or str(X[c].dtype) == "category" or X[c].dtype == "bool")
+    ]
+    cb_cat_idx = [X.columns.get_loc(c) for c in cb_cat_cols]
+
     X_cb = X.copy()
     test_cb = test.copy()
 
-    # numeric median
     for c in EXPECTED_NUMERIC:
         if c in X_cb.columns:
             med = X_cb[c].median()
             X_cb[c] = X_cb[c].fillna(med)
             test_cb[c] = test_cb[c].fillna(med)
 
-    # categorical most frequent
     for c in cb_cat_cols:
-        mode = X_cb[c].mode(dropna=True)
-        fill_val = mode.iloc[0] if len(mode) else "missing"
+        mode_val = X_cb[c].mode(dropna=True)
+        fill_val = mode_val.iloc[0] if len(mode_val) else "missing"
         X_cb[c] = X_cb[c].fillna(fill_val).astype(str)
         test_cb[c] = test_cb[c].fillna(fill_val).astype(str)
 
-    # Parameter samples (small but effective)
     rng = np.random.default_rng(RANDOM_STATE)
     cb_param_samples = []
     for _ in range(20):
@@ -316,7 +366,6 @@ def main():
         })
 
     best_cb = None
-    fold_scores_for_best = None
 
     for i, p in enumerate(cb_param_samples, start=1):
         fold_scores = []
@@ -337,6 +386,7 @@ def main():
 
         mean_score = float(np.mean(fold_scores))
         std_score = float(np.std(fold_scores))
+
         if best_cb is None or mean_score > best_cb["cv_balanced_acc_mean"]:
             best_cb = {
                 "model": "CatBoost",
@@ -344,11 +394,11 @@ def main():
                 "cv_balanced_acc_std": std_score,
                 "best_params": p
             }
-            fold_scores_for_best = fold_scores
 
         print(f"  Sample {i:02d}: mean={mean_score:.4f}, std={std_score:.4f}, params={p}")
 
     print(f"\nBest CatBoost CV balanced accuracy: {best_cb['cv_balanced_acc_mean']:.4f} ± {best_cb['cv_balanced_acc_std']:.4f}")
+
     results.append({
         "model": "CatBoost",
         "cv_balanced_acc_mean": best_cb["cv_balanced_acc_mean"],
@@ -356,24 +406,24 @@ def main():
         "best_params": {f"model__{k}": v for k, v in best_cb["best_params"].items()}
     })
 
-    # Compare CatBoost to current best_overall
     if best_cb["cv_balanced_acc_mean"] > best_overall["cv_balanced_acc_mean"]:
         best_overall = {
             "model": "CatBoost",
             "cv_balanced_acc_mean": best_cb["cv_balanced_acc_mean"],
             "cv_balanced_acc_std": best_cb["cv_balanced_acc_std"],
             "best_params": best_cb["best_params"],
-            "best_estimator": None,  # will refit below
+            "best_estimator": None,
             "catboost_cat_cols": cb_cat_cols
         }
 
-    # ---- Save leaderboard ----
+    # -------------------------
+    # Save artifacts
+    # -------------------------
     leaderboard = pd.DataFrame(results).sort_values("cv_balanced_acc_mean", ascending=False)
     leaderboard_path = ARTIFACTS_DIR / "leaderboard.csv"
     leaderboard.to_csv(leaderboard_path, index=False)
     print(f"\nSaved leaderboard -> {leaderboard_path}")
 
-    # ---- Save best model config ----
     best_cfg = {
         "best_model": best_overall["model"],
         "cv_balanced_acc_mean": best_overall["cv_balanced_acc_mean"],
@@ -385,7 +435,7 @@ def main():
     cfg_path.write_text(json.dumps(best_cfg, indent=2))
     print(f"Saved best model config -> {cfg_path}")
 
-    # ---- Fit best model on full train & generate predictions for test (sanity) ----
+    # Fit best model on full train and predict test
     if best_overall["model"] == "CatBoost":
         p = best_overall["best_params"]
         model = CatBoostClassifier(
@@ -409,6 +459,36 @@ def main():
 
     print("\n=== BEST OVERALL ===")
     print(json.dumps(best_cfg, indent=2))
+
+    # Optional: save probability scores if model supports it (for ROC plots, etc.)
+    proba_path = ARTIFACTS_DIR / "test_scores.csv"
+    try:
+        if best_overall["model"] == "CatBoost":
+            test_score = model.predict_proba(test_cb)[:, 1]
+        else:
+            if hasattr(best_pipe, "predict_proba"):
+                test_score = best_pipe.predict_proba(test)[:, 1]
+            elif hasattr(best_pipe, "decision_function"):
+                test_score = best_pipe.decision_function(test)
+            else:
+                test_score = None
+
+        if test_score is not None:
+            pd.DataFrame({ID_COL: test[ID_COL], "score": test_score}).to_csv(proba_path, index=False)
+            print(f"Saved test scores -> {proba_path}")
+    except Exception:
+        pass
+
+    summary_path = ARTIFACTS_DIR / "summary_for_slides.json"
+    summary = {
+        "metric": "Balanced Accuracy (5-fold Stratified CV)",
+        "n_train": int(train.shape[0]),
+        "n_test": int(test.shape[0]),
+        "leaderboard_top5": leaderboard.head(5).to_dict(orient="records"),
+        "best_model": best_cfg
+    }
+    summary_path.write_text(json.dumps(summary, indent=2))
+    print(f"Saved slide summary -> {summary_path}")
 
 
 if __name__ == "__main__":
