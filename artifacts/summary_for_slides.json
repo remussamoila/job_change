@@ -1,0 +1,80 @@
+{
+  "metric": "Balanced Accuracy (5-fold Stratified CV)",
+  "n_train": 12427,
+  "n_test": 3308,
+  "leaderboard_top5": [
+    {
+      "model": "RandomForest",
+      "cv_balanced_acc_mean": 0.765543277493352,
+      "cv_balanced_acc_std": 0.011053225703397788,
+      "best_params": {
+        "model__n_estimators": 600,
+        "model__min_samples_leaf": 5,
+        "model__max_features": "log2",
+        "model__max_depth": null
+      }
+    },
+    {
+      "model": "RandomForest_SMOTE",
+      "cv_balanced_acc_mean": 0.7640215192009259,
+      "cv_balanced_acc_std": 0.013389361639278988,
+      "best_params": {
+        "model__n_estimators": 1000,
+        "model__min_samples_leaf": 10,
+        "model__max_features": "log2",
+        "model__max_depth": null,
+        "model__class_weight": null
+      }
+    },
+    {
+      "model": "CatBoost",
+      "cv_balanced_acc_mean": 0.7255432436864035,
+      "cv_balanced_acc_std": 0.015263071474089932,
+      "best_params": {
+        "model__depth": 6,
+        "model__learning_rate": 0.02,
+        "model__l2_leaf_reg": 5.0,
+        "model__iterations": 1200
+      }
+    },
+    {
+      "model": "XGBoost",
+      "cv_balanced_acc_mean": 0.7203508911910335,
+      "cv_balanced_acc_std": 0.009479868304152992,
+      "best_params": {
+        "model__subsample": 1.0,
+        "model__reg_lambda": 1.0,
+        "model__min_child_weight": 1,
+        "model__max_depth": 6,
+        "model__learning_rate": 0.03,
+        "model__colsample_bytree": 1.0
+      }
+    },
+    {
+      "model": "LightGBM",
+      "cv_balanced_acc_mean": 0.7193648416227016,
+      "cv_balanced_acc_std": 0.010686732594499593,
+      "best_params": {
+        "model__subsample": 0.85,
+        "model__reg_lambda": 1.0,
+        "model__num_leaves": 15,
+        "model__min_child_samples": 10,
+        "model__max_depth": 6,
+        "model__learning_rate": 0.03,
+        "model__colsample_bytree": 0.85
+      }
+    }
+  ],
+  "best_model": {
+    "best_model": "RandomForest",
+    "cv_balanced_acc_mean": 0.765543277493352,
+    "cv_balanced_acc_std": 0.011053225703397788,
+    "best_params": {
+      "model__n_estimators": 600,
+      "model__min_samples_leaf": 5,
+      "model__max_features": "log2",
+      "model__max_depth": null
+    },
+    "notes": "Balanced accuracy estimated via 5-fold Stratified CV on training set."
+  }
+}
