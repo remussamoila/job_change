@@ -13,15 +13,15 @@ Models evaluated
 Baselines / linear:
 1) Logistic Regression (OHE) GridSearchCV
 2) Linear SVM (LinearSVC, OHE) GridSearchCV
-
+3) k-Nearest Neighbors (KNN) (One-Hot Encoding + scaling)
 Tree ensembles:
-3) Random Forest (OHE, class_weight="balanced")
-4) Random Forest + SMOTE (OHE + SMOTE inside CV, no leakage)
+4) Random Forest (OHE, class_weight="balanced")
+5) Random Forest + SMOTE One-Hot Encoding, SMOTE applied inside cross-validation folds only (no data leakage)
 
 Boosting:
-5) XGBoost (OHE)
-6) LightGBM (OHE)
-7) CatBoost (native categorical handling; no OHE)
+6) XGBoost (OHE)
+7) LightGBM (OHE)
+8) CatBoost (native categorical handling; no OHE)
 
 Metric: Balanced Accuracy (5-fold Stratified CV)
 """
