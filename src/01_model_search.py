@@ -20,6 +20,10 @@ from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from catboost import CatBoostClassifier
 
+# Rebalancing (installed via: pip install imbalanced-learn)
+from imblearn.over_sampling import SMOTE
+from imblearn.pipeline import Pipeline as ImbPipeline
+
 warnings.filterwarnings("ignore")
 
 RANDOM_STATE = 42
@@ -164,6 +168,26 @@ def main():
         12
     ))
 
+    # --- Random Forest + SMOTE (data rebalancing inside CV only; no leakage) ---
+    # NOTE: we remove class_weight here to avoid "double balancing" (SMOTE + weights)
+    candidates.append((
+        "RandomForest_SMOTE",
+        ImbPipeline([
+            ("preprocess", ohe_pre),
+            ("smote", SMOTE(random_state=RANDOM_STATE, k_neighbors=3)),
+            ("model", RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=-1))
+        ]),
+        {
+            "model__n_estimators": [600, 1000],
+            "model__max_depth": [6, 8, 10, None],
+            "model__min_samples_leaf": [2, 5, 10],
+            "model__max_features": ["sqrt", "log2", None],
+            # Optional: sometimes helps with imbalance
+            "model__class_weight": [None, "balanced"]
+        },
+        12
+    ))
+    
     # --- XGBoost (FAST) ---
     candidates.append((
         "XGBoost",
