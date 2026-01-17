@@ -33,7 +33,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from sklearn.model_selection import StratifiedKFold, RandomizedSearchCV, GridSearchCV
+from sklearn.model_selection import StratifiedKFold, RandomizedSearchCV, GridSearchCV, cross_val_predict
 from sklearn.metrics import balanced_accuracy_score, make_scorer
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -43,6 +43,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.base import clone
 
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
@@ -124,6 +125,7 @@ def main():
     test = _coerce_numeric(test, EXPECTED_NUMERIC)
 
     X = train.drop(columns=[TARGET_COL])
+    X_test = test[X.columns].copy()
     y = _map_target(train[TARGET_COL])
 
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
@@ -218,7 +220,7 @@ def main():
             "model__max_depth": [6, 8, 10, None],
             "model__min_samples_leaf": [2, 5, 10],
             "model__max_features": ["sqrt", "log2", None],
-            "model__class_weight": [None],
+            "model__class_weight": [None, "balanced"],
         },
         12
     ))
@@ -435,6 +437,57 @@ def main():
     cfg_path.write_text(json.dumps(best_cfg, indent=2))
     print(f"Saved best model config -> {cfg_path}")
 
+    best_pipe = None
+    model = None
+
+    # ---- Out-of-fold (OOF) TRAIN scores for ROC / expected performance proxy ----
+    # These scores are produced on TRAIN via CV predictions (no leakage).
+    # Use artifacts/oof_scores_best_model.csv to plot ROC and report AUC-like measures.
+
+    oof_path = ARTIFACTS_DIR / "oof_scores_best_model.csv"
+
+    try:
+        if best_overall["model"] == "CatBoost":
+            # CatBoost: manual OOF because we're not using an sklearn wrapper here
+            oof_score = np.zeros(len(X_cb), dtype=float)
+
+            for tr_idx, va_idx in cv.split(X_cb, y):
+                X_tr, X_va = X_cb.iloc[tr_idx], X_cb.iloc[va_idx]
+                y_tr = y.iloc[tr_idx]
+
+                cb = CatBoostClassifier(
+                    **best_overall["best_params"],
+                    loss_function="Logloss",
+                    random_seed=RANDOM_STATE,
+                    verbose=False
+                )
+                cb.fit(X_tr, y_tr, cat_features=cb_cat_idx)
+                oof_score[va_idx] = cb.predict_proba(X_va)[:, 1]
+
+        else:
+            # sklearn pipeline: use cross_val_predict safely
+            estimator = clone(best_overall["best_estimator"])
+
+
+            if hasattr(estimator, "predict_proba"):
+                oof_score = cross_val_predict(
+                    estimator, X, y, cv=cv, method="predict_proba", n_jobs=1
+                )[:, 1]
+            elif hasattr(estimator, "decision_function"):
+                oof_score = cross_val_predict(
+                    estimator, X, y, cv=cv, method="decision_function", n_jobs=1
+                )
+            else:
+                oof_score = None
+
+        if oof_score is not None:
+            pd.DataFrame({"y_true": y.values, "score": oof_score}).to_csv(oof_path, index=False)
+            print(f"Saved OOF train scores -> {oof_path}")
+
+    except Exception as e:
+        print(f"OOF scoring skipped: {e}")
+
+  
     # Fit best model on full train and predict test
     if best_overall["model"] == "CatBoost":
         p = best_overall["best_params"]
@@ -450,7 +503,9 @@ def main():
     else:
         best_pipe = best_overall["best_estimator"]
         best_pipe.fit(X, y)
-        test_pred = best_pipe.predict(test).astype(int)
+        test_pred = best_pipe.predict(X_test).astype(int)
+
+
 
     pred_path = ARTIFACTS_DIR / "predictions_from_best_search.csv"
     out = pd.DataFrame({ID_COL: test[ID_COL], TARGET_COL: test_pred})
@@ -461,21 +516,23 @@ def main():
     print(json.dumps(best_cfg, indent=2))
 
     # Optional: save probability scores if model supports it (for ROC plots, etc.)
-    proba_path = ARTIFACTS_DIR / "test_scores.csv"
+    proba_path = ARTIFACTS_DIR / "test_scores_unlabeled.csv"
+
     try:
         if best_overall["model"] == "CatBoost":
             test_score = model.predict_proba(test_cb)[:, 1]
         else:
             if hasattr(best_pipe, "predict_proba"):
-                test_score = best_pipe.predict_proba(test)[:, 1]
+                test_score = best_pipe.predict_proba(X_test)[:, 1]
             elif hasattr(best_pipe, "decision_function"):
-                test_score = best_pipe.decision_function(test)
+                test_score = best_pipe.decision_function(X_test)
             else:
                 test_score = None
 
         if test_score is not None:
             pd.DataFrame({ID_COL: test[ID_COL], "score": test_score}).to_csv(proba_path, index=False)
-            print(f"Saved test scores -> {proba_path}")
+            print(f"Saved test scores (unlabeled) -> {proba_path}")
+
     except Exception:
         pass
 
