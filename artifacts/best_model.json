@@ -1,12 +1,12 @@
 {
   "best_model": "RandomForest",
-  "cv_balanced_acc_mean": 0.7298076650819969,
-  "cv_balanced_acc_std": 0.009271407673297665,
+  "cv_balanced_acc_mean": 0.765543277493352,
+  "cv_balanced_acc_std": 0.011053225703397788,
   "best_params": {
-    "model__n_estimators": 1200,
+    "model__n_estimators": 600,
     "model__min_samples_leaf": 5,
-    "model__max_features": null,
-    "model__max_depth": 8
+    "model__max_features": "log2",
+    "model__max_depth": null
   },
   "notes": "Balanced accuracy estimated via 5-fold Stratified CV on training set."
 }
